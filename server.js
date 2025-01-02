@@ -4,6 +4,8 @@
  */
 
 // 必要なモジュールのインポート
+const ExifReader = require('exif-reader');
+const sharp = require('sharp');
 const express = require('express');
 const fs = require('fs');                  // 通常のfs
 const fsPromises  = require('fs').promises;  // Promise版のfs
@@ -38,6 +40,27 @@ app.use((req, res, next) => {
     next();
 });
 
+// メタデータを取得する関数
+async function getImageMetadata(filePath) {
+    try {
+        const metadata = await sharp(filePath).metadata();
+        if (metadata.exif) {
+            const exifData = ExifReader.load(metadata.exif);
+            return {
+                comment: exifData.UserComment ? exifData.UserComment.description : '',
+                width: metadata.width,
+                height: metadata.height,
+                format: metadata.format,
+                // EXIF情報から追加で取得したい情報があれば追加
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error('Error reading metadata:', error);
+        return null;
+    }
+}
+
 /**
  * 指定されたパスが安全かチェックする関数
  * @param {string} targetPath - チェックするパス
@@ -67,7 +90,13 @@ async function getImagesRecursively(dir) {
                     const relativePath = path.relative(EXTERNAL_IMAGE_DIR, fullPath)
                         .split(path.sep)
                         .join('/'); // パスセパレータを/に統一
-                    images.push(relativePath);
+                    // メタデータを取得
+                    const metadata = await getImageMetadata(fullPath);
+                    images.push({
+                        path: relativePath,
+                        metadata: metadata || {},
+                        filename: item.name
+                    });
                 }
             }
         }
@@ -103,6 +132,10 @@ app.get('/api/images', async (req, res) => {
 
         const imageFiles = await getImagesRecursively(targetDir);
         console.log(`Found ${imageFiles.length} images in ${targetDir}`);
+
+        // レスポンスの形式が変更されている点に注意
+        // 以前: { images: ['path1', 'path2', ...] }
+        // 現在: { images: [{ path: 'path1', metadata: {...}, filename: 'name1' }, ...] }
         res.json({ images: imageFiles });
 
     } catch (error) {
