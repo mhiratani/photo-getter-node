@@ -43,21 +43,53 @@ app.use((req, res, next) => {
 // メタデータを取得する関数
 async function getImageMetadata(filePath) {
     try {
-        const metadata = await sharp(filePath).metadata();
-        if (metadata.exif) {
-            const exifData = ExifReader.load(metadata.exif);
-            return {
-                comment: exifData.UserComment ? exifData.UserComment.description : '',
-                width: metadata.width,
-                height: metadata.height,
-                format: metadata.format,
-                // EXIF情報から追加で取得したい情報があれば追加
-            };
+        // ファイル拡張子チェック
+        const ext = path.extname(filePath).toLowerCase();
+        if (!['.jpg', '.jpeg', '.tiff', '.png'].includes(ext)) {
+            return null;
         }
-        return null;
+
+        // ファイルの存在確認
+        const stats = await fsPromises.stat(filePath);
+        if (!stats.isFile()) {
+            throw new Error('Not a file');
+        }
+
+        // ファイルをバッファとして読み込み
+        const buffer = await fsPromises.readFile(filePath);
+
+        // メタデータの読み取り
+        const tags = await ExifReader.load(buffer, {
+            expanded: true,  // 拡張情報も取得
+        });
+
+        // 必要なメタデータを抽出
+        return {
+            fileName: path.basename(filePath),
+            fileSize: stats.size,
+            dateTime: tags.exif?.DateTimeOriginal?.description || 
+                     tags.exif?.DateTime?.description || 
+                     stats.mtime.toISOString(),
+            make: tags.exif?.Make?.description || null,
+            model: tags.exif?.Model?.description || null,
+            orientation: tags.exif?.Orientation?.value || 1,
+            width: tags.exif?.ImageWidth?.value || null,
+            height: tags.exif?.ImageHeight?.value || null,
+            gps: tags.gps ? {
+                latitude: tags.gps?.Latitude,
+                longitude: tags.gps?.Longitude
+            } : null
+        };
+
     } catch (error) {
-        console.error('Error reading metadata:', error);
-        return null;
+        console.error(`Metadata extraction failed for ${filePath}:`, error);
+        // 基本的なファイル情報だけでも返す
+        return {
+            fileName: path.basename(filePath),
+            fileSize: (await fsPromises.stat(filePath)).size,
+            dateTime: (await fsPromises.stat(filePath)).mtime.toISOString(),
+            error: error.message
+        };
     }
 }
 
