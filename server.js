@@ -100,26 +100,6 @@ app.get('/api/images', async (req, res) => {
             return res.status(404).json({ error: 'Directory not found' });
         }
 
-        // ディレクトリ内のファイルを再帰的に取得
-        async function getImagesRecursively(dir) {
-            const items = await fsPromises.readdir(dir, { withFileTypes: true });
-            let images = [];
-
-            for (const item of items) {
-                const fullPath = path.join(dir, item.name);
-                if (item.isDirectory()) {
-                    const subImages = await getImagesRecursively(fullPath);
-                    images = images.concat(subImages);
-                } else {
-                    const ext = path.extname(item.name).toLowerCase();
-                    if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) {
-                        const relativePath = path.relative(EXTERNAL_IMAGE_DIR, fullPath);
-                        images.push(relativePath);
-                    }
-                }
-            }
-            return images;
-        }
 
         const imageFiles = await getImagesRecursively(targetDir);
         console.log(`Found ${imageFiles.length} images in ${targetDir}`);
