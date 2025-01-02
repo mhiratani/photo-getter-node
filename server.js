@@ -4,7 +4,7 @@
  */
 
 // 必要なモジュールのインポート
-const ExifReader = require('exif-reader');
+const ExifReader = require('exifreader');
 const sharp = require('sharp');
 const express = require('express');
 const fs = require('fs');                  // 通常のfs
@@ -161,7 +161,6 @@ app.get('/api/images', async (req, res) => {
             return res.status(404).json({ error: 'Directory not found' });
         }
 
-
         const imageFiles = await getImagesRecursively(targetDir);
         console.log(`Found ${imageFiles.length} images in ${targetDir}`);
 
@@ -188,62 +187,152 @@ app.get('/stream/image/*', async (req, res) => {
         // URLデコードしてパスを取得
         const imagePath = decodeURIComponent(req.params[0]);
         const fullPath = path.join(EXTERNAL_IMAGE_DIR, imagePath);
-
         console.log('Requested file path:', fullPath);
 
-        // パスの安全性チェック
-        if (!isPathSafe(fullPath)) {
-            console.error('Invalid path detected:', fullPath);
-            return res.status(403).send('Forbidden');
-        }
+        // 基本的なバリデーションチェック
+        await validateRequest(fullPath);
 
-        // ファイルの存在確認
-        try {
-            await fsPromises.access(fullPath, fs.constants.R_OK);
-        } catch (error) {
-            console.error('File access error:', error);
-            return res.status(404).send('File not found');
-        }
-
-        // ファイルの状態確認
-        const stats = await fsPromises.stat(fullPath);
-        if (!stats.isFile()) {
-            console.error('Not a file:', fullPath);
-            return res.status(400).send('Not a file');
-        }
-
-        // Content-Typeの設定
-        const ext = path.extname(fullPath).toLowerCase();
-        const mimeTypes = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif'
+        // クエリパラメータの取得
+        const options = {
+            width: parseInt(req.query.w) || 1280,
+            quality: parseInt(req.query.q) || 80,
+            format: req.query.format || 'auto',
+            acceptsWebP: req.headers.accept?.includes('image/webp')
         };
 
-        const contentType = mimeTypes[ext] || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Length', stats.size);
-        res.setHeader('Cache-Control', 'public, max-age=31536000'); // キャッシュ設定
-
-        // ファイルのストリーミング配信
-        const stream = fs.createReadStream(fullPath);
-        stream.on('error', (error) => {
-            console.error('Stream error:', error);
-            if (!res.headersSent) {
-                res.status(500).send('Error reading file');
+        try {
+            // 画像処理を試みる
+            console.log('画像処理を試みる:', fullPath);
+            await processAndStreamImage(fullPath, options, res);
+        } catch (processingError) {
+            console.error('Image processing failed, falling back to original file:', processingError);
+            try {
+                // 画像処理に失敗した場合、元のファイルを送信
+                await streamOriginalFile(fullPath, res);
+            } catch (streamingError) {
+                console.error('Failed to stream original file:', streamingError);
+                // 必要に応じて、ここでクライアントにエラーレスポンスを送信
+                res.status(500).send('Internal Server Error');
             }
-        });
-
-        stream.pipe(res);
+        }
 
     } catch (error) {
-        console.error('Error handling request:', error);
-        if (!res.headersSent) {
-            res.status(500).send('Internal server error');
-        }
+        handleError(error, res);
+        console.log('handleError');
     }
 });
+
+// リクエストの検証
+async function validateRequest(fullPath) {
+    if (!isPathSafe(fullPath)) {
+        throw new Error('FORBIDDEN_PATH');
+    }
+
+    try {
+        await fsPromises.access(fullPath, fs.constants.R_OK);
+        const stats = await fsPromises.stat(fullPath);
+        if (!stats.isFile()) {
+            throw new Error('NOT_A_FILE');
+        }
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            throw new Error('FILE_NOT_FOUND');
+        }
+        throw error;
+    }
+}
+
+// 画像処理とストリーミング
+async function processAndStreamImage(fullPath, options, res) {
+    const { width, quality, format, acceptsWebP } = options;
+    const ext = path.extname(fullPath).toLowerCase();
+
+    // 画像処理パイプラインの作成
+    let imageProcessor = sharp(fullPath);
+
+    // リサイズの適用
+    if (width) {
+        imageProcessor = imageProcessor.resize(width, null, {
+            withoutEnlargement: true,
+            fit: 'inside'
+        });
+    }
+
+    // フォーマット設定
+    if (format === 'webp' || (format === 'auto' && acceptsWebP)) {
+        imageProcessor = imageProcessor.webp({ quality });
+        res.setHeader('Content-Type', 'image/webp');
+    } else {
+        applyOriginalFormat(imageProcessor, ext, quality, res);
+    }
+
+    // キャッシュヘッダーの設定
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+
+    // メタデータチェック（破損チェック）
+    await imageProcessor.metadata();
+
+    // ストリーミング
+    return new Promise((resolve, reject) => {
+        imageProcessor
+            .pipe(res)
+            .on('error', reject)
+            .on('finish', resolve);
+    });
+}
+
+// 元のファイルをストリーミング
+async function streamOriginalFile(fullPath, res) {
+    const ext = path.extname(fullPath).toLowerCase();
+    res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.setHeader('X-Served-Original', 'true');
+
+    return new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(fullPath);
+        stream.pipe(res);
+        stream.on('error', reject);
+        stream.on('end', resolve);
+    });
+}
+
+// 元の形式を適用
+function applyOriginalFormat(imageProcessor, ext, quality, res) {
+    switch (ext) {
+        case '.jpg':
+        case '.jpeg':
+            imageProcessor = imageProcessor.jpeg({ quality });
+            res.setHeader('Content-Type', 'image/jpeg');
+            break;
+        case '.png':
+            imageProcessor = imageProcessor.png({ quality });
+            res.setHeader('Content-Type', 'image/png');
+            break;
+        default:
+            res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+    }
+    return imageProcessor;
+}
+
+// エラーハンドリング
+function handleError(error, res) {
+    console.error('Error handling request:', error);
+
+    if (res.headersSent) return;
+    switch (error.message) {
+        case 'FORBIDDEN_PATH':
+            res.status(403).send('Forbidden');
+            break;
+        case 'FILE_NOT_FOUND':
+            res.status(404).send('File not found');
+            break;
+        case 'NOT_A_FILE':
+            res.status(400).send('Not a file');
+            break;
+        default:
+            res.status(500).send('Internal server error');
+    }
+}
 
 // テストエンドポイント
 app.get('/test', (req, res) => {
