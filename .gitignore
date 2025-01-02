@@ -1,0 +1,36 @@
+# Nodeモジュール
+node_modules/
+
+# ログファイル
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 環境変数ファイル
+.env
+
+# プロセスIDファイル
+*.pid
+*.pid.lock
+
+# コンパイルされたバイナリやビルド出力
+dist/
+build/
+
+# OSまたはIDEによって生成されるファイル
+.DS_Store
+Thumbs.db
+
+# VSCodeプロジェクトファイル
+.vscode/
+
+# IDEが生成するファイル（JetBrains, Eclipseなど）
+.idea/
+.project
+.classpath
+
+# npm pack .tgzファイル
+*.tgz
+
+# テストのカバレッジ結果
+coverage/
