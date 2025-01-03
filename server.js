@@ -66,6 +66,7 @@ async function getImageMetadata(filePath) {
         // 必要なメタデータを抽出
         return {
             fileName: path.basename(filePath),
+            comment: tags.exif?.UserComment?.description || null,
             fileSize: stats.size,
             dateTime: tags.exif?.DateTimeOriginal?.description || 
                      tags.exif?.DateTime?.description || 
