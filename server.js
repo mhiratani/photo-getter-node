@@ -4,12 +4,13 @@
  */
 
 // 必要なモジュールのインポート
-const ExifReader = require('exifreader');
-const sharp = require('sharp');
-const express = require('express');
-const fs = require('fs');                  // 通常のfs
-const fsPromises  = require('fs').promises;  // Promise版のfs
-const path = require('path');    // パス操作用
+import ExifReader from 'exifreader';
+import sharp from 'sharp';
+import fs from 'fs';
+import fsPromises from 'fs/promises';
+import path from 'path';
+import express from 'express';
+import dotenv from 'dotenv';
 const app = express();           // Expressアプリケーションの初期化
 
 /**
@@ -22,7 +23,7 @@ app.use((req, res, next) => {
     next();
 });
 // dotenvをインポートして設定をロード
-require('dotenv').config();
+dotenv.config();
 
 // EXTERNAL_IMAGE_DIRに環境変数の値を設定
 const EXTERNAL_IMAGE_DIR = process.env.EXTERNAL_IMAGE_DIR;
