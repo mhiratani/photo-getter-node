@@ -27,6 +27,7 @@ dotenv.config();
 
 // EXTERNAL_IMAGE_DIRに環境変数の値を設定
 const EXTERNAL_IMAGE_DIR = process.env.EXTERNAL_IMAGE_DIR;
+const EXTERNAL_PORTRAIT_IMAGE_DIR = process.env.EXTERNAL_PORTRAIT_IMAGE_DIR;
 
 // サーバーの設定
 const PORT = process.env.PORT || 3003;                          // ポート番号の設定（環境変数またはデフォルト値）
@@ -100,14 +101,14 @@ async function getImageMetadata(filePath) {
  * @param {string} targetPath - チェックするパス
  * @returns {boolean} - パスが安全な場合はtrue
  */
-function isPathSafe(targetPath) {
+function isPathSafe(targetPath, imageDir) {
     const normalizedPath = path.normalize(targetPath);
-    const flag = normalizedPath.startsWith(EXTERNAL_IMAGE_DIR) && !normalizedPath.includes('..');
+    const flag = normalizedPath.startsWith(imageDir) && !normalizedPath.includes('..');
     console.log('isPathSafe:', flag);
     return flag;
 }
 
-async function getImagesRecursively(dir) {
+async function getImagesRecursively(dir, imageDir) {
     try {
         const items = await fsPromises.readdir(dir, { withFileTypes: true });
         let images = [];
@@ -121,7 +122,7 @@ async function getImagesRecursively(dir) {
                 const ext = path.extname(item.name).toLowerCase();
                 if (['.jpg', '.jpeg', '.png', '.gif'].includes(ext)) {
                     // パスを正規化して相対パスに変換
-                    const relativePath = path.relative(EXTERNAL_IMAGE_DIR, fullPath)
+                    const relativePath = path.relative(imageDir, fullPath)
                         .split(path.sep)
                         .join('/'); // パスセパレータを/に統一
                     // メタデータを取得
@@ -146,13 +147,13 @@ async function getImagesRecursively(dir) {
  * 指定されたディレクトリ内の画像ファイルの一覧を返す
  * クエリパラメータでサブフォルダを指定可能
  */
-app.get('/api/images', async (req, res) => {
+app.get('/api/image', async (req, res) => {
     try {
         const subFolder = req.query.folder || '';
         const targetDir = path.join(EXTERNAL_IMAGE_DIR, subFolder);
 
         // パスの安全性チェック
-        if (!isPathSafe(targetDir)) {
+        if (!isPathSafe(targetDir, EXTERNAL_IMAGE_DIR)) {
             return res.status(403).json({ error: 'Invalid path' });
         }
 
@@ -163,7 +164,37 @@ app.get('/api/images', async (req, res) => {
             return res.status(404).json({ error: 'Directory not found' });
         }
 
-        const imageFiles = await getImagesRecursively(targetDir);
+        const imageFiles = await getImagesRecursively(targetDir, EXTERNAL_IMAGE_DIR);
+        console.log(`Found ${imageFiles.length} images in ${targetDir}`);
+
+        // レスポンスの形式が変更されている点に注意
+        // 以前: { images: ['path1', 'path2', ...] }
+        // 現在: { images: [{ path: 'path1', metadata: {...}, filename: 'name1' }, ...] }
+        res.json({ images: imageFiles });
+
+    } catch (error) {
+        console.error('Error reading directory:', error);
+        res.status(500).json({ error: 'Failed to read directory' });
+    }
+});
+app.get('/api/portrait_images', async (req, res) => {
+    try {
+        const subFolder = req.query.folder || '';
+        const targetDir = path.join(EXTERNAL_PORTRAIT_IMAGE_DIR, subFolder);
+
+        // パスの安全性チェック
+        if (!isPathSafe(targetDir, EXTERNAL_PORTRAIT_IMAGE_DIR)) {
+            return res.status(403).json({ error: 'Invalid path' });
+        }
+
+        // ディレクトリの存在確認
+        try {
+            await fsPromises.access(targetDir);
+        } catch (error) {
+            return res.status(404).json({ error: 'Directory not found' });
+        }
+
+        const imageFiles = await getImagesRecursively(targetDir, EXTERNAL_PORTRAIT_IMAGE_DIR);
         console.log(`Found ${imageFiles.length} images in ${targetDir}`);
 
         // レスポンスの形式が変更されている点に注意
@@ -192,7 +223,49 @@ app.get('/stream/image/*', async (req, res) => {
         console.log('Requested file path:', fullPath);
 
         // 基本的なバリデーションチェック
-        await validateRequest(fullPath);
+        await validateRequest(fullPath,EXTERNAL_IMAGE_DIR);
+
+        // クエリパラメータの取得
+        const options = {
+            width: parseInt(req.query.w) || 1280,
+            quality: parseInt(req.query.q) || 80,
+            format: req.query.format || 'auto',
+            acceptsWebP: req.headers.accept?.includes('image/webp')
+        };
+
+        try {
+            // 画像処理を試みる
+            console.log('画像処理を試みる:', fullPath);
+            await processAndStreamImage(fullPath, options, res);
+        } catch (processingError) {
+            console.error('Image processing failed, falling back to original file:', processingError);
+            try {
+                // 画像処理に失敗した場合、元のファイルを送信
+                await streamOriginalFile(fullPath, res);
+            } catch (streamingError) {
+                console.error('Failed to stream original file:', streamingError);
+                // 必要に応じて、ここでクライアントにエラーレスポンスを送信
+                res.status(500).send('Internal Server Error');
+            }
+        }
+
+    } catch (error) {
+        handleError(error, res);
+        console.log('handleError');
+    }
+});
+
+app.get('/stream/portrait_images/*', async (req, res) => {
+    console.log('Stream endpoint called');
+    console.log('Params:', req.params);
+    try {
+        // URLデコードしてパスを取得
+        const imagePath = decodeURIComponent(req.params[0]);
+        const fullPath = path.join(EXTERNAL_PORTRAIT_IMAGE_DIR, imagePath);
+        console.log('Requested file path:', fullPath);
+
+        // 基本的なバリデーションチェック
+        await validateRequest(fullPath, EXTERNAL_PORTRAIT_IMAGE_DIR);
 
         // クエリパラメータの取得
         const options = {
@@ -225,8 +298,8 @@ app.get('/stream/image/*', async (req, res) => {
 });
 
 // リクエストの検証
-async function validateRequest(fullPath) {
-    if (!isPathSafe(fullPath)) {
+async function validateRequest(fullPath,imageDir) {
+    if (!isPathSafe(fullPath,imageDir)) {
         throw new Error('FORBIDDEN_PATH');
     }
 
