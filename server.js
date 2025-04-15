@@ -228,7 +228,7 @@ app.get('/stream/image/*', async (req, res) => {
         // クエリパラメータの取得
         const options = {
             width: parseInt(req.query.w) || 1280,
-            quality: parseInt(req.query.q) || 80,
+            quality: parseInt(req.query.q) || 100,
             format: req.query.format || 'auto',
             acceptsWebP: req.headers.accept?.includes('image/webp')
         };
@@ -270,7 +270,7 @@ app.get('/stream/portrait_images/*', async (req, res) => {
         // クエリパラメータの取得
         const options = {
             width: parseInt(req.query.w) || 1280,
-            quality: parseInt(req.query.q) || 80,
+            quality: parseInt(req.query.q) || 100,
             format: req.query.format || 'auto',
             acceptsWebP: req.headers.accept?.includes('image/webp')
         };
