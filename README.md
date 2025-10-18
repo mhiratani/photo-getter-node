@@ -4,10 +4,8 @@ npm install -g pm2
 ```
 1. アプリケーションの起動と常駐化:
 ```Bash
-pm2 start server.js --name photo-getter-app
+pm2 start ecosystem.config.cjs
 ```
--  server.js: 起動したいスクリプトファイル名
--  --name photo-getter-app: プロセスにわかりやすい名前をつけます（任意）
 
 1. 状態確認:
 ```Bash
@@ -25,17 +23,17 @@ pm2 logs all # すべてのアプリのログ
 
 1. アプリケーションの停止:
 ```Bash
-pm2 stop photo-getter-app
+pm2 stop ecosystem.config.cjs
 ```
 
 1. アプリケーションの再起動:
 ```Bash
-pm2 restart photo-getter-app
+pm2 restart ecosystem.config.cjs
 ```
 
 1. アプリケーションの削除 (管理対象から外す):
 ```Bash
-pm2 delete photo-getter-app
+pm2 delete ecosystem.config.cjs
 ```
 
 1. システムの起動時に自動起動させる設定: 現在のPM2の状態を保存し、OSの起動スクリプトを生成する
