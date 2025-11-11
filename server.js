@@ -323,7 +323,7 @@ async function processAndStreamImage(fullPath, options, res) {
     const ext = path.extname(fullPath).toLowerCase();
 
     // 画像処理パイプラインの作成
-    let imageProcessor = sharp(fullPath);
+    let imageProcessor = sharp(fullPath).rotate();
 
     // リサイズの適用
     if (width) {
